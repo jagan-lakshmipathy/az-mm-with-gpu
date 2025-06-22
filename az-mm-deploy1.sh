@@ -38,39 +38,67 @@ subscription_id=$(az account show --query id --output tsv)
 VM_IP=$(az vm list-ip-addresses --resource-group ${RG_VM} --name ${VM_NAME} --query "[0].virtualMachine.network.publicIpAddresses[0].ipAddress" --output tsv)
 
 
-# Wait a few seconds to allow Azure RBAC propagation
-sleep 10  # Adjust as needed based on Azure delay
+# Wait for Managed Identity to be ready
+echo "⏳ Waiting for VM's Managed Identity to be ready..."
+for i in {1..6}; do
+  result=$(az vm run-command invoke \
+    --resource-group ${RG_VM} \
+    --name ${VM_NAME} \
+    --command-id RunShellScript \
+    --scripts "az login --identity --allow-no-subscriptions && az account show --query id -o tsv" \
+    --query 'value[0].message' -o tsv 2>/dev/null)
 
-# SSH into VM to Configure Docker and Pull Image
-ssh -o StrictHostKeyChecking=no ${USRNAME}@${VM_IP} << EOF
-  set -e  # Ensure script exits on failure
-  
-  az login --identity --allow-no-subscriptions
-  az account show
-  echo "✅ VM loggedin w/ Idenity."
+  if [[ -n "$result" && "$result" != *"ERROR"* ]]; then
+    echo "✅ Managed Identity is ready with subscription ID: $result"
+    break
+  else
+    echo "⏳ Waiting for Managed Identity to fully initialize... retrying in 10s"
+    sleep 10
+  fi
+done
 
-  # Check if Docker is running
-  sudo systemctl status docker --no-pager || sudo systemctl start docker
+# SSH into VM to Configure Docker and Pull Image (with retries)
+for i in {1..3}; do
+  echo "🔐 Attempting SSH and setup (try $i)..."
+  ssh -o StrictHostKeyChecking=no ${USRNAME}@${VM_IP} <<EOF
+    set -e
 
-  # Add user to Docker group
-  sudo usermod -aG docker \$USER
-  newgrp docker  # Apply changes immediately
+    # Login with Managed Identity
+    az login --identity --allow-no-subscriptions
+    az account show
+    echo "✅ VM logged in with Identity."
 
-  # Get ACR access token
-  ACCESS_TOKEN=\$(az acr login --name ${ACR_NAME} --expose-token --output tsv --query accessToken)
-  echo "✅ Extracted access-token successfully."
+    # Ensure Docker is running
+    sudo systemctl status docker --no-pager || sudo systemctl start docker
 
-  # Authenticate with Docker
-  docker login ${ACR_NAME}.azurecr.io --username 00000000-0000-0000-0000-000000000000 --password \${ACCESS_TOKEN}
-  echo "✅ Docker logged in with access-token."
+    # Add user to Docker group
+    sudo usermod -aG docker \$USER
+    newgrp docker
 
-  # Ensure Docker socket permissions
-  sudo chmod 666 /var/run/docker.sock
+    # Get ACR access token
+    ACCESS_TOKEN=\$(az acr login --name ${ACR_NAME} --expose-token --output tsv --query accessToken)
+    echo "✅ Extracted access-token successfully."
 
-  # Pull required container image
-  docker pull ${ACR_NAME}.azurecr.io/mm-openlab-jupyter:latest
-  echo "✅ Image was successfully pulled in."
+    # Authenticate with Docker
+    docker login ${ACR_NAME}.azurecr.io --username 00000000-0000-0000-0000-000000000000 --password \${ACCESS_TOKEN}
+    echo "✅ Docker logged in with access-token."
 
-  # Run the Docker container (Detached mode to avoid SSH interference)
-  # sudo docker run --gpus all -p 8888:8888 -d ${ACR_NAME}.azurecr.io/mm-openlab-jupyter:latest || exit 1
+    # Ensure Docker socket permissions
+    sudo chmod 666 /var/run/docker.sock
+
+    # Pull the container image
+    docker pull ${ACR_NAME}.azurecr.io/mm-openlab-jupyter:latest
+    echo "✅ Image was successfully pulled in."
+
+    # Run the Docker container
+    # sudo docker run --gpus all -p 8888:8888 -d ${ACR_NAME}.azurecr.io/mm-openlab-jupyter:latest || exit 1
 EOF
+
+  if [ $? -eq 0 ]; then
+    echo "✅ SSH and setup completed successfully."
+    break
+  else
+    echo "❌ SSH or setup failed. Retrying in 15 seconds..."
+    sleep 15
+  fi
+done

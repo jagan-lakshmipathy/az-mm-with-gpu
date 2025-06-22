@@ -167,26 +167,16 @@ echo "✅ VM rebooted successfully! Running 'nvidia-smi' to verify GPU setup."
 ssh ${USRNAME}@${VM_IP} "nvidia-smi"
 
 # Install Docker and start service
-ssh -o StrictHostKeyChecking=no ${USRNAME}@${VM_IP} << 'EOF'
+ssh -o StrictHostKeyChecking=no ${USRNAME}@${VM_IP} << EOF
+  ARCH=\$(dpkg --print-architecture)
+  distribution=\$(. /etc/os-release; echo \$ID\$VERSION_ID)
+
   sudo apt-get update
   sudo apt-get install -y docker.io
   sudo systemctl start docker
   sudo systemctl enable docker
   echo "🐳 Docker installed and running."
-EOF
 
-
-ssh -o StrictHostKeyChecking=no ${USRNAME}@${VM_IP} <<EOF
-  # Define system architecture and distribution on the remote machine
-  ARCH=\$(dpkg --print-architecture)
-  distribution=\$(. /etc/os-release; echo \$ID\$VERSION_ID)
-
-  # Install Docker
-  sudo apt-get update || exit 1
-  sudo apt-get install -y docker.io || exit 1
-  sudo systemctl start docker
-  sudo systemctl enable docker
-  echo "🐳 Docker installed and running."
 
   # Remove broken NVIDIA repository
   sudo rm -rf /etc/apt/sources.list.d/nvidia-container-toolkit.list
@@ -196,7 +186,7 @@ ssh -o StrictHostKeyChecking=no ${USRNAME}@${VM_IP} <<EOF
   curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb -o cuda-keyring.deb || exit 1
   sudo dpkg -i cuda-keyring.deb || exit 1
   sudo apt-get update || exit 1
-  sudo apt-get install -y cuda-toolkit-12-3 || exit 1
+  #sudo apt-get install -y cuda-toolkit-11-8 || exit 1
 
   # Install NVIDIA Container Runtime
   sudo apt-get install -y nvidia-container-toolkit || exit 1

@@ -89,7 +89,7 @@ fi
 az acr login --name $ACR_NAME
 echo "🔐 Logged in to ACR."
 
-docker buildx build --no-cache --platform linux/amd64 -f Dockerfile.jupyter.temp -t $ACR_NAME.azurecr.io/mm-openlab-jupyter:latest --push .
+docker buildx build --no-cache --platform linux/amd64 -f Dockerfile.mmcv.2.0.0 -t $ACR_NAME.azurecr.io/mm-openlab-jupyter:latest --push .
 
 
 # Wait a few seconds to ensure the image is available
